@@ -10,8 +10,10 @@ import paho.mqtt.client as mqtt
 import logging
 import sys
 import threading
+import requests
 from pdu import PDU
 from typing import Dict, Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Configure logging
 logging.basicConfig(
@@ -26,8 +28,24 @@ client = None
 mqtt_topic = None
 pdu_instances = {}
 
+def as_bool(value: Any, default: bool = False) -> bool:
+    """Convert string/bool-ish values to bool."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ('1', 'true', 'yes', 'on')
+    if value is None:
+        return default
+    return bool(value)
+
 def load_config():
     """Load configuration from Home Assistant add-on options"""
+    def env_int(name: str, default: int) -> int:
+        try:
+            return int(os.getenv(name, default))
+        except (TypeError, ValueError):
+            return default
+
     try:
         with open('/data/options.json', 'r') as f:
             options = json.load(f)
@@ -35,19 +53,163 @@ def load_config():
         return options
     except FileNotFoundError:
         logger.warning("Home Assistant options file not found, using environment variables")
+        raw_device_list = os.getenv('DEVICE_LIST', os.getenv('PDU_LIST', '[]'))
+        try:
+            parsed_device_list = json.loads(raw_device_list)
+            if not isinstance(parsed_device_list, list):
+                parsed_device_list = []
+        except json.JSONDecodeError:
+            logger.warning("Invalid DEVICE_LIST/PDU_LIST JSON, using empty list")
+            parsed_device_list = []
         return {
             'mqtt_host': os.getenv('MQTT_HOST', 'localhost'),
-            'mqtt_port': int(os.getenv('MQTT_PORT', 1883)),
+            'mqtt_port': env_int('MQTT_PORT', 1883),
             'mqtt_user': os.getenv('MQTT_USER', ''),
             'mqtt_password': os.getenv('MQTT_PASSWORD', ''),
             'mqtt_topic': os.getenv('MQTT_TOPIC', 'pdu'),
-            'pdu_list': json.loads(os.getenv('PDU_LIST', '[]'))
+            # Keep both keys for backward compatibility with existing configs/docs
+            'device_list': parsed_device_list,
+            'pdu_list': parsed_device_list,
+            'auto_discovery': os.getenv('AUTO_DISCOVERY', 'false').lower() == 'true',
+            'discovery_network': os.getenv('DISCOVERY_NETWORK', '192.168.1'),
+            'discovery_range_start': env_int('DISCOVERY_RANGE_START', 1),
+            'discovery_range_end': env_int('DISCOVERY_RANGE_END', 254)
         }
+
+def normalize_pdu_list(config: Dict[str, Any]) -> list:
+    """
+    Normalize PDU configuration from both new and legacy keys.
+    Supports:
+      - device_list (current add-on schema)
+      - pdu_list (legacy docs/format)
+    """
+    raw_devices = []
+    if isinstance(config.get('device_list'), list):
+        raw_devices.extend(config.get('device_list', []))
+    if isinstance(config.get('pdu_list'), list):
+        raw_devices.extend(config.get('pdu_list', []))
+
+    pdus = []
+    seen = set()
+    for idx, device in enumerate(raw_devices, start=1):
+        if not isinstance(device, dict):
+            logger.warning(f"Ignoring invalid device entry #{idx}: expected object")
+            continue
+
+        device_type = str(device.get('type', 'PDU')).strip().lower()
+        if device_type and device_type not in ('pdu', 'logilink', 'intellinet', 'pdu8p01'):
+            logger.debug(
+                "Skipping non-PDU device '%s' (type=%s)",
+                device.get('name', f"entry_{idx}"),
+                device_type
+            )
+            continue
+
+        host = str(device.get('host', device.get('ip', ''))).strip()
+        if not host:
+            logger.warning(f"Ignoring device entry without host: {device}")
+            continue
+
+        name = str(device.get('name', f"pdu_{host.replace('.', '_')}")).strip()
+        username = str(device.get('username', 'admin'))
+        password = str(device.get('password', 'admin'))
+
+        dedupe_key = (name, host)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+
+        pdus.append({
+            'name': name,
+            'host': host,
+            'username': username,
+            'password': password
+        })
+
+    return pdus
+
+def probe_pdu_status(host: str, username: str, password: str, timeout: float = 1.5) -> bool:
+    """Quick probe used by network auto-discovery."""
+    try:
+        response = requests.get(
+            f"http://{host}/status.xml",
+            auth=(username, password),
+            timeout=timeout
+        )
+        return response.status_code == 200 and "<response>" in response.text
+    except requests.RequestException:
+        return False
+
+def discover_pdus_from_network(config: Dict[str, Any], existing_pdus: list) -> list:
+    """Discover PDUs on network when none are explicitly configured."""
+    network = str(config.get('discovery_network', '')).strip()
+    if not network:
+        logger.warning("Auto-discovery enabled but discovery_network is empty")
+        return []
+
+    try:
+        start_ip = max(1, min(int(config.get('discovery_range_start', 1)), 254))
+        end_ip = max(1, min(int(config.get('discovery_range_end', 254)), 254))
+        if start_ip > end_ip:
+            start_ip, end_ip = end_ip, start_ip
+    except (TypeError, ValueError):
+        logger.warning("Invalid discovery range, using 1-254")
+        start_ip, end_ip = 1, 254
+
+    existing_hosts = {pdu['host'] for pdu in existing_pdus if 'host' in pdu}
+    hosts_to_probe = [
+        f"{network}.{ip}"
+        for ip in range(start_ip, end_ip + 1)
+        if f"{network}.{ip}" not in existing_hosts
+    ]
+
+    # Try common default credentials first
+    credentials = [
+        ('admin', 'admin'),
+        ('admin', ''),
+        ('root', 'admin'),
+        ('user', 'user')
+    ]
+
+    logger.info(
+        f"Starting network PDU auto-discovery on {network}.{start_ip}-{end_ip} ({len(hosts_to_probe)} hosts)"
+    )
+
+    discovered = []
+    max_workers = min(64, max(1, len(hosts_to_probe)))
+
+    def check_host(host: str):
+        for username, password in credentials:
+            if probe_pdu_status(host, username, password):
+                return {
+                    'name': f"pdu_{host.replace('.', '_')}",
+                    'host': host,
+                    'username': username or 'admin',
+                    'password': password
+                }
+        return None
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(check_host, host): host for host in hosts_to_probe}
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                if result:
+                    discovered.append(result)
+                    logger.info(
+                        f"Auto-discovery found PDU at {result['host']} (username={result['username']})"
+                    )
+            except Exception as e:
+                logger.debug(f"Auto-discovery probe error: {e}")
+
+    logger.info(f"Auto-discovery completed. Found {len(discovered)} PDU(s).")
+    return discovered
 
 def on_connect(client, userdata, flags, rc, properties=None):
     """MQTT connection callback (compatible with both API versions)"""
     # Handle both API v1 and v2 (properties parameter is optional in v1)
-    if rc == 0:
+    rc_value = int(rc) if hasattr(rc, "__int__") else rc
+    if rc_value == 0:
         logger.info("Connected to MQTT broker")
         
         # Subscribe to control topics for all PDUs
@@ -108,12 +270,12 @@ def on_message(client, userdata, msg):
                 logger.error(f"Failed to set {pdu_name} outlet {outlet_num}")
                 
         # Extended features (for future implementation)
-        elif topic_parts[2] == 'outlet' and len(topic_parts) > 4 and topic_parts[4] == 'config' and topic_parts[5] == 'set':
+        elif topic_parts[2] == 'outlet' and len(topic_parts) > 5 and topic_parts[4] == 'config' and topic_parts[5] == 'set':
             outlet_num = int(topic_parts[3])
             logger.info(f"Outlet config request for {pdu_name} outlet {outlet_num}: {payload}")
             # TODO: Implement outlet configuration when PDU supports it
             
-        elif topic_parts[2] == 'network' and topic_parts[3] == 'set':
+        elif topic_parts[2] == 'network' and len(topic_parts) > 3 and topic_parts[3] == 'set':
             logger.info(f"Network config request for {pdu_name}: {payload}")
             # TODO: Implement network configuration when PDU supports it
             
@@ -122,7 +284,7 @@ def on_message(client, userdata, msg):
             logger.info(f"Threshold config request for {pdu_name} {sensor_type}: {payload}")
             # TODO: Implement threshold configuration when PDU supports it
             
-        elif topic_parts[2] == 'system' and topic_parts[3] == 'reboot':
+        elif topic_parts[2] == 'system' and len(topic_parts) > 3 and topic_parts[3] == 'reboot':
             if payload.upper() == 'REBOOT':
                 logger.warning(f"Reboot request for {pdu_name}")
                 # TODO: Implement reboot when PDU supports it
@@ -253,7 +415,15 @@ def main():
         mqtt_user = config.get('mqtt_user', '')
         mqtt_password = config.get('mqtt_password', '')
         mqtt_topic = config.get('mqtt_topic', 'pdu')
-        pdu_list = config.get('pdu_list', [])
+        auto_discovery = as_bool(config.get('auto_discovery', False), default=False)
+
+        # Support both `device_list` (current schema) and `pdu_list` (legacy)
+        pdu_list = normalize_pdu_list(config)
+
+        # Auto-discover PDUs only when no explicit PDU configuration exists
+        if not pdu_list and auto_discovery:
+            logger.info("No PDUs configured in device_list/pdu_list. Trying network auto-discovery...")
+            pdu_list = discover_pdus_from_network(config, pdu_list)
         
         # Start web interface in background
         logger.info("Starting PDU Discovery Web Interface...")
@@ -261,7 +431,9 @@ def main():
         web_thread.start()
         
         if not pdu_list:
-            logger.warning("No PDUs configured yet - use the web interface to discover and configure PDUs!")
+            logger.warning(
+                "No PDUs configured/discovered yet - use device_list in add-on options or the web interface."
+            )
             logger.info("Web interface available at: http://localhost:8099")
             # Keep running even without PDUs for web interface
             logger.info("Entering standby mode - waiting for PDU configuration...")

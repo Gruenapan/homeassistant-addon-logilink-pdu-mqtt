@@ -157,7 +157,15 @@ class PDUController:
                 # Parse XML to get outlet information
                 try:
                     root = ET.fromstring(response.text)
-                    outlets = root.findall(".//outlet")
+                    # LogiLink uses outletStat0..outletStat7 instead of <outlet> nodes
+                    outlets = []
+                    for index in range(8):
+                        outlet_state = root.findtext(f"outletStat{index}")
+                        if outlet_state is not None:
+                            outlets.append({
+                                "id": str(index + 1),
+                                "state": outlet_state.lower()
+                            })
                     
                     return {
                         "success": True,
