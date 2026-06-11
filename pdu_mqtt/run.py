@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 client = None
 mqtt_topic = None
 pdu_instances = {}
+PDU_MODEL = "LogiLink PDU8P01"
 
 def as_bool(value: Any, default: bool = False) -> bool:
     """Convert string/bool-ish values to bool."""
@@ -306,6 +307,19 @@ def publish_status(pdu_name, pdu):
     try:
         logger.debug(f"Publishing status for PDU: {pdu_name}")
         status = pdu.status()
+
+        device_info = {
+            "model": PDU_MODEL,
+            "ip": pdu.host,
+            "status": "online" if status else "offline"
+        }
+        for info_id, value in device_info.items():
+            client.publish(
+                f"{mqtt_topic}/{pdu_name}/device/{info_id}",
+                value,
+                retain=True
+            )
+
         if status:
             # Publish outlet states
             if 'outlets' in status:
@@ -325,14 +339,6 @@ def publish_status(pdu_name, pdu):
             if 'curBan' in status and status['curBan']:
                 cur_topic = f"{mqtt_topic}/{pdu_name}/sensor/current"
                 client.publish(cur_topic, status['curBan'], retain=True)
-            # Publish device info
-            device_info = {
-                "model": "LogiLink PDU8P01",
-                "ip": pdu.host,
-                "status": "online"
-            }
-            client.publish(f"{mqtt_topic}/{pdu_name}/device/info", 
-                         json.dumps(device_info), retain=True)
             logger.debug(f"Status published for PDU {pdu_name} - {len(status.get('outlets', []))} outlets")
         else:
             logger.warning(f"No status data received from PDU: {pdu_name}")
@@ -396,21 +402,37 @@ def send_discovery_messages():
             discovery_topic = f"{discovery_prefix}/sensor/{sensor_entity_id}/config"
             client.publish(discovery_topic, json.dumps(sensor_config), retain=True)
             logger.debug(f"Published discovery for sensor.{sensor_entity_id}")
-        # Additional entities for extended features
-        # Text sensor for device info
-        text_sensor_config = {
-            "name": f"{clean_name} Device Info",
-            "unique_id": f"{clean_name}_device_info",
-            "state_topic": f"{mqtt_topic}/{pdu_name}/device/info",
-            "device": {
-                "identifiers": [f"pdu_{pdu_name}"],
-                "name": f"PDU {pdu_name}",
-                "model": "LogiLink PDU8P01",
-                "manufacturer": "LogiLink"
+        # Remove the legacy combined JSON sensor and its retained state.
+        client.publish(
+            f"{discovery_prefix}/sensor/{clean_name}_device_info/config",
+            "",
+            retain=True
+        )
+        client.publish(f"{mqtt_topic}/{pdu_name}/device/info", "", retain=True)
+
+        device_info_sensors = [
+            ("model", "Model", "mdi:information-outline"),
+            ("ip", "IP", "mdi:ip-network"),
+            ("status", "Status", "mdi:lan-connect")
+        ]
+        for sensor_id, name, icon in device_info_sensors:
+            sensor_entity_id = f"{clean_name}_{sensor_id}"
+            sensor_config = {
+                "name": name,
+                "unique_id": sensor_entity_id,
+                "object_id": sensor_entity_id,
+                "state_topic": f"{mqtt_topic}/{pdu_name}/device/{sensor_id}",
+                "icon": icon,
+                "entity_category": "diagnostic",
+                "device": {
+                    "identifiers": [f"pdu_{pdu_name}"],
+                    "name": f"PDU {pdu_name}",
+                    "model": PDU_MODEL,
+                    "manufacturer": "LogiLink"
+                }
             }
-        }
-        discovery_topic = f"{discovery_prefix}/sensor/{clean_name}_device_info/config"
-        client.publish(discovery_topic, json.dumps(text_sensor_config), retain=True)
+            discovery_topic = f"{discovery_prefix}/sensor/{sensor_entity_id}/config"
+            client.publish(discovery_topic, json.dumps(sensor_config), retain=True)
     logger.info("MQTT Discovery messages sent")
 
 def main():
@@ -461,7 +483,7 @@ def main():
             )
             logger.info(f"Created PDU instance for {pdu_name}")
         
-        logger.info("Starting PDU MQTT Bridge v1.4.2")
+        logger.info("Starting PDU MQTT Bridge v1.4.3")
         logger.info(f"MQTT: {mqtt_host}:{mqtt_port}")
         logger.info(f"PDUs: {list(pdu_instances.keys())}")
         logger.info(f"Web interface: http://localhost:8099")

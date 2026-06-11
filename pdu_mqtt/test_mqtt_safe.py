@@ -20,7 +20,7 @@ def on_connect(client, userdata, flags, rc):
     client.subscribe(f"pdu/{PDU_NAME}/outlet1/state")
     client.subscribe(f"pdu/{PDU_NAME}/outlet8/state")
     client.subscribe(f"pdu/{PDU_NAME}/sensor/+")
-    client.subscribe(f"pdu/{PDU_NAME}/device/info")
+    client.subscribe(f"pdu/{PDU_NAME}/device/+")
 
 def on_message(client, userdata, msg):
     print(f"{msg.topic}: {msg.payload.decode()}")
@@ -63,4 +63,4 @@ def test_basic_control():
     client.disconnect()
 
 if __name__ == "__main__":
-    test_basic_control() 
+    test_basic_control()

@@ -119,7 +119,9 @@ Example email config:
 
 - **Reboot**: `pdu/{pdu_name}/system/reboot` (send "REBOOT")
 - **Status**: `pdu/{pdu_name}/system/status` (status messages)
-- **Device Info**: `pdu/{pdu_name}/device/info` (JSON with model, version, MAC, uptime)
+- **Device Model**: `pdu/{pdu_name}/device/model`
+- **Device IP**: `pdu/{pdu_name}/device/ip`
+- **Device Status**: `pdu/{pdu_name}/device/status` (`online` or `offline`)
 
 ### 8. Home Assistant Discovery
 
@@ -256,4 +258,4 @@ mosquitto_sub -h 192.168.1.241 -u mqttuser -P mqttpass \
 2. Status topics use `retain=true` for persistence
 3. The bridge polls PDU status every 30 seconds
 4. Network changes may cause temporary disconnection
-5. Some features may vary depending on PDU firmware version 
+5. Some features may vary depending on PDU firmware version

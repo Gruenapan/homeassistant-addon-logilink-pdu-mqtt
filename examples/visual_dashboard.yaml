@@ -353,8 +353,12 @@ views:
           - type: entities
             title: "Status Detalhado"
             entities:
-              - entity: sensor.rack_01_device_info
-                name: "Informação do Dispositivo"
+              - entity: sensor.pdu_rack_01_model
+                name: "Modelo"
+              - entity: sensor.pdu_rack_01_ip
+                name: "Endereço IP"
+              - entity: sensor.pdu_rack_01_status
+                name: "Estado"
               - entity: sensor.rack_01_uptime
                 name: "Tempo Online"
               - entity: sensor.rack_01_total_power

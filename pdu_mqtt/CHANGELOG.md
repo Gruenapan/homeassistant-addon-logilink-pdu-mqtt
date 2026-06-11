@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.3] - 2026-06-11
+
+### Changed
+- Replace the combined device-info JSON sensor with separate model, IP address,
+  and connection-status diagnostic sensors.
+- Remove the obsolete combined sensor through MQTT discovery cleanup.
+
 ## [1.4.2] - 2026-06-11
 
 ### Fixed

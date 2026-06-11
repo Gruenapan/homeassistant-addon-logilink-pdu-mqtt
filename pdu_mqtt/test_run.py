@@ -1,6 +1,7 @@
 import sys
 import types
 import unittest
+import json
 
 try:
     import paho.mqtt.client  # noqa: F401
@@ -37,6 +38,18 @@ class FakeMqttClient:
     def loop_start(self):
         self.calls.append(("loop_start",))
 
+    def publish(self, topic, payload, retain=False):
+        self.calls.append(("publish", topic, payload, retain))
+
+
+class FakePdu:
+    def __init__(self, status):
+        self.host = "192.0.2.10"
+        self._status = status
+
+    def status(self):
+        return self._status
+
 
 class MqttStartupTests(unittest.TestCase):
     def test_start_mqtt_loop_uses_non_blocking_connection_with_backoff(self):
@@ -58,6 +71,62 @@ class MqttStartupTests(unittest.TestCase):
 
     def test_disconnect_callback_accepts_v2_signature(self):
         run.on_disconnect(None, None, {}, 0, None)
+
+    def test_publish_status_splits_device_info_into_scalar_topics(self):
+        client = FakeMqttClient()
+        old_client, old_topic = run.client, run.mqtt_topic
+        run.client, run.mqtt_topic = client, "pdu"
+        try:
+            run.publish_status("rack", FakePdu({"outlets": []}))
+        finally:
+            run.client, run.mqtt_topic = old_client, old_topic
+
+        self.assertIn(
+            ("publish", "pdu/rack/device/model", "LogiLink PDU8P01", True),
+            client.calls,
+        )
+        self.assertIn(
+            ("publish", "pdu/rack/device/ip", "192.0.2.10", True),
+            client.calls,
+        )
+        self.assertIn(
+            ("publish", "pdu/rack/device/status", "online", True),
+            client.calls,
+        )
+        self.assertNotIn("pdu/rack/device/info", [call[1] for call in client.calls])
+
+    def test_discovery_replaces_combined_device_info_sensor(self):
+        client = FakeMqttClient()
+        old_client = run.client
+        old_topic = run.mqtt_topic
+        old_instances = run.pdu_instances
+        run.client = client
+        run.mqtt_topic = "pdu"
+        run.pdu_instances = {"rack": FakePdu({"outlets": []})}
+        try:
+            run.send_discovery_messages()
+        finally:
+            run.client = old_client
+            run.mqtt_topic = old_topic
+            run.pdu_instances = old_instances
+
+        publishes = {
+            call[1]: call[2]
+            for call in client.calls
+            if call[0] == "publish"
+        }
+        self.assertEqual(
+            publishes["homeassistant/sensor/rack_device_info/config"],
+            "",
+        )
+        self.assertEqual(publishes["pdu/rack/device/info"], "")
+        for sensor_id in ("model", "ip", "status"):
+            topic = f"homeassistant/sensor/rack_{sensor_id}/config"
+            config = json.loads(publishes[topic])
+            self.assertEqual(
+                config["state_topic"],
+                f"pdu/rack/device/{sensor_id}",
+            )
 
 
 if __name__ == "__main__":
