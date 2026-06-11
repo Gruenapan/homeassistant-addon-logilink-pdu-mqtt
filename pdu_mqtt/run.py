@@ -15,12 +15,6 @@ from pdu import PDU
 from typing import Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
 logger = logging.getLogger(__name__)
 
 # Global variables
@@ -28,6 +22,38 @@ client = None
 mqtt_topic = None
 pdu_instances = {}
 PDU_MODEL = "LogiLink PDU8P01"
+LOG_LEVELS = {
+    "WARNING": logging.WARNING,
+    "INFO": logging.INFO,
+    "DEBUG": logging.DEBUG,
+}
+
+def normalize_log_level(value: Any, default: str = "INFO") -> str:
+    """Return a supported logging level name."""
+    level_name = str(value or default).strip().upper()
+    return level_name if level_name in LOG_LEVELS else default
+
+def configure_logging(value: Any) -> str:
+    """Configure all application logging from one selected threshold."""
+    requested_level = str(value or "INFO").strip().upper()
+    level_name = normalize_log_level(requested_level)
+    logging.basicConfig(
+        level=LOG_LEVELS[level_name],
+        format="%(levelname)s:%(name)s:%(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)],
+        force=True,
+    )
+
+    # HTTP access logs are diagnostic detail; keep actual web errors visible.
+    logging.getLogger("werkzeug").setLevel(
+        logging.INFO if level_name == "DEBUG" else logging.ERROR
+    )
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+    if requested_level not in LOG_LEVELS:
+        logger.warning("Invalid log level '%s'; using INFO", requested_level)
+
+    return level_name
 
 def as_bool(value: Any, default: bool = False) -> bool:
     """Convert string/bool-ish values to bool."""
@@ -50,7 +76,6 @@ def load_config():
     try:
         with open('/data/options.json', 'r') as f:
             options = json.load(f)
-        logger.info("Loaded configuration from Home Assistant options")
         return options
     except FileNotFoundError:
         logger.warning("Home Assistant options file not found, using environment variables")
@@ -68,6 +93,7 @@ def load_config():
             'mqtt_user': os.getenv('MQTT_USER', ''),
             'mqtt_password': os.getenv('MQTT_PASSWORD', ''),
             'mqtt_topic': os.getenv('MQTT_TOPIC', 'pdu'),
+            'log_level': os.getenv('LOG_LEVEL', 'INFO'),
             # Keep both keys for backward compatibility with existing configs/docs
             'device_list': parsed_device_list,
             'pdu_list': parsed_device_list,
@@ -220,7 +246,7 @@ def on_connect(client, userdata, flags, rc, properties=None):
             # Basic outlet control
             for i in range(1, 9):
                 client.subscribe(f"{base}/outlet{i}/set")
-                logger.info(f"Subscribed to {base}/outlet{i}/set")
+                logger.debug(f"Subscribed to {base}/outlet{i}/set")
             
             # Extended configuration topics
             client.subscribe(f"{base}/config/+/set")
@@ -282,16 +308,20 @@ def on_message(client, userdata, msg):
         # Extended features (for future implementation)
         elif topic_parts[2] == 'outlet' and len(topic_parts) > 5 and topic_parts[4] == 'config' and topic_parts[5] == 'set':
             outlet_num = int(topic_parts[3])
-            logger.info(f"Outlet config request for {pdu_name} outlet {outlet_num}: {payload}")
+            logger.warning(
+                f"Unsupported outlet config request for {pdu_name} outlet {outlet_num}: {payload}"
+            )
             # TODO: Implement outlet configuration when PDU supports it
             
         elif topic_parts[2] == 'network' and len(topic_parts) > 3 and topic_parts[3] == 'set':
-            logger.info(f"Network config request for {pdu_name}: {payload}")
+            logger.warning(f"Unsupported network config request for {pdu_name}: {payload}")
             # TODO: Implement network configuration when PDU supports it
             
         elif topic_parts[2] == 'threshold' and len(topic_parts) > 4 and topic_parts[4] == 'set':
             sensor_type = topic_parts[3]
-            logger.info(f"Threshold config request for {pdu_name} {sensor_type}: {payload}")
+            logger.warning(
+                f"Unsupported threshold config request for {pdu_name} {sensor_type}: {payload}"
+            )
             # TODO: Implement threshold configuration when PDU supports it
             
         elif topic_parts[2] == 'system' and len(topic_parts) > 3 and topic_parts[3] == 'reboot':
@@ -437,10 +467,20 @@ def send_discovery_messages():
 
 def main():
     global client, mqtt_topic, pdu_instances
-    
+
+    configure_logging(os.getenv('LOG_LEVEL', 'INFO'))
+
     try:
         # Load configuration
+        config_source = (
+            "Home Assistant options"
+            if os.path.exists('/data/options.json')
+            else "environment variables"
+        )
         config = load_config()
+        log_level = configure_logging(config.get('log_level', 'INFO'))
+        logger.info("Loaded configuration from %s", config_source)
+        logger.info("Log level: %s", log_level)
         mqtt_host = config.get('mqtt_host', 'localhost')
         mqtt_port = config.get('mqtt_port', 1883)
         mqtt_user = config.get('mqtt_user', '')
@@ -483,7 +523,7 @@ def main():
             )
             logger.info(f"Created PDU instance for {pdu_name}")
         
-        logger.info("Starting PDU MQTT Bridge v1.4.3")
+        logger.info("Starting PDU MQTT Bridge v1.4.4")
         logger.info(f"MQTT: {mqtt_host}:{mqtt_port}")
         logger.info(f"PDUs: {list(pdu_instances.keys())}")
         logger.info(f"Web interface: http://localhost:8099")
@@ -524,7 +564,7 @@ def main():
                 
                 import datetime
                 current_time = datetime.datetime.now().strftime("%H:%M:%S")
-                logger.info(f"Main loop completed at {current_time}, sleeping for 30 seconds...")
+                logger.debug(f"Main loop completed at {current_time}, sleeping for 30 seconds...")
                 time.sleep(30)  # Update every 30 seconds
                 
             except Exception as e:

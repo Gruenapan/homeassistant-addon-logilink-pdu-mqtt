@@ -69,6 +69,7 @@ mqtt_port: 1883
 mqtt_user: "ha"
 mqtt_password: "supersecure"
 mqtt_topic: "pdu"
+log_level: "INFO"
 auto_discovery: false
 discovery_network: "192.168.1"
 pdu_list:
@@ -201,9 +202,17 @@ You can test PDU connectivity using the included test script:
 python test_pdu.py 192.168.1.112 admin admin
 ```
 
-### Debug Mode
+### Log Level
 
-To enable debug logging, edit the add-on configuration and add:
+The `log_level` option accepts three values:
+
+| Value | Messages shown |
+| --- | --- |
+| `WARNING` | Unexpected or degraded conditions, plus errors and critical failures |
+| `INFO` | Normal startup, connections, discovery and control actions, plus warnings/errors |
+| `DEBUG` | Detailed polling, MQTT subscriptions, HTTP access and diagnostic data, plus all higher levels |
+
+The default is `INFO`. To enable diagnostic logging:
 
 ```yaml
 log_level: DEBUG

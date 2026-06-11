@@ -126,7 +126,7 @@ class HomeAssistantThemeIntegration:
     def get_current_theme(self) -> Optional[Dict[str, Any]]:
         """Get the current theme from Home Assistant"""
         if not self.ha_url or not self.ha_token:
-            logger.warning("Home Assistant URL or token not available")
+            logger.debug("Home Assistant theme API unavailable; using default theme")
             return None
         
         try:
@@ -145,7 +145,7 @@ class HomeAssistantThemeIntegration:
             
             if response.status_code == 200:
                 config = response.json()
-                logger.info(f"Retrieved HA config: {config.get('version', 'unknown')}")
+                logger.debug(f"Retrieved HA config: {config.get('version', 'unknown')}")
                 
                 # Try to get current theme via states
                 states_response = requests.get(
@@ -162,13 +162,13 @@ class HomeAssistantThemeIntegration:
                         if state.get('entity_id') == 'frontend':
                             attributes = state.get('attributes', {})
                             theme = attributes.get('theme', 'default')
-                            logger.info(f"Current theme: {theme}")
+                            logger.debug(f"Current theme: {theme}")
                             return {'theme': theme, 'config': config}
                 
                 return {'theme': 'default', 'config': config}
             
         except Exception as e:
-            logger.error(f"Error getting HA theme: {e}")
+            logger.warning(f"Unable to get optional Home Assistant theme: {e}")
         
         return None
     
@@ -201,7 +201,7 @@ class HomeAssistantThemeIntegration:
             
             if response.status_code == 200:
                 themes_data = response.json()
-                logger.info(f"Retrieved themes data: {list(themes_data.keys())}")
+                logger.debug(f"Retrieved themes data: {list(themes_data.keys())}")
                 
                 # Get theme variables
                 theme_vars = self.default_theme_variables.copy()
@@ -217,7 +217,7 @@ class HomeAssistantThemeIntegration:
                 return theme_vars
                 
         except Exception as e:
-            logger.error(f"Error getting theme variables: {e}")
+            logger.warning(f"Unable to get optional theme variables: {e}")
         
         return self.default_theme_variables
     

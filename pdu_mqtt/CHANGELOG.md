@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.4] - 2026-06-11
+
+### Changed
+- Add a configurable `log_level` option with `WARNING`, `INFO`, and `DEBUG`.
+- Centralize logging configuration and reduce routine polling and HTTP noise.
+- Treat unavailable optional Home Assistant theme integration as debug detail.
+
 ## [1.4.3] - 2026-06-11
 
 ### Changed

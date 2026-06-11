@@ -2,6 +2,8 @@ import sys
 import types
 import unittest
 import json
+import logging
+from unittest.mock import patch
 
 try:
     import paho.mqtt.client  # noqa: F401
@@ -52,6 +54,29 @@ class FakePdu:
 
 
 class MqttStartupTests(unittest.TestCase):
+    def test_log_level_normalization_supports_configured_levels(self):
+        self.assertEqual(run.normalize_log_level("warning"), "WARNING")
+        self.assertEqual(run.normalize_log_level("INFO"), "INFO")
+        self.assertEqual(run.normalize_log_level("Debug"), "DEBUG")
+        self.assertEqual(run.normalize_log_level("verbose"), "INFO")
+
+    def test_configure_logging_applies_selected_threshold(self):
+        werkzeug_logger = logging.getLogger("werkzeug")
+        urllib3_logger = logging.getLogger("urllib3")
+        old_werkzeug_level = werkzeug_logger.level
+        old_urllib3_level = urllib3_logger.level
+        try:
+            with patch.object(run.logging, "basicConfig") as basic_config:
+                selected = run.configure_logging("DEBUG")
+
+            self.assertEqual(selected, "DEBUG")
+            self.assertEqual(basic_config.call_args.kwargs["level"], logging.DEBUG)
+            self.assertEqual(werkzeug_logger.level, logging.INFO)
+            self.assertEqual(urllib3_logger.level, logging.WARNING)
+        finally:
+            werkzeug_logger.setLevel(old_werkzeug_level)
+            urllib3_logger.setLevel(old_urllib3_level)
+
     def test_start_mqtt_loop_uses_non_blocking_connection_with_backoff(self):
         client = FakeMqttClient()
 

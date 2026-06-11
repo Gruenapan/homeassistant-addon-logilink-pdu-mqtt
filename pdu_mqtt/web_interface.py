@@ -17,8 +17,6 @@ import re
 from device_detection import DeviceDiscovery
 from ha_theme_integration import ha_theme_integration
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -340,7 +338,7 @@ def get_ha_theme():
         theme_info = ha_theme_integration.get_theme_info()
         return jsonify(theme_info)
     except Exception as e:
-        logger.error(f"Error getting HA theme: {e}")
+        logger.warning(f"Unable to get optional Home Assistant theme: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/ha_theme/css', methods=['GET'])
@@ -359,7 +357,7 @@ def get_ha_theme_css():
         response.headers['Cache-Control'] = 'public, max-age=300'  # 5 minutes
         return response
     except Exception as e:
-        logger.error(f"Error generating theme CSS: {e}")
+        logger.warning(f"Unable to generate optional theme CSS: {e}")
         return app.response_class(
             response=f"/* Error generating theme CSS: {e} */",
             mimetype='text/css'
@@ -373,7 +371,7 @@ def refresh_ha_theme():
         theme_info = ha_theme_integration.get_theme_info()
         return jsonify(theme_info)
     except Exception as e:
-        logger.error(f"Error refreshing HA theme: {e}")
+        logger.warning(f"Unable to refresh optional Home Assistant theme: {e}")
         return jsonify({'error': str(e)}), 500
 
 def run_server(host='0.0.0.0', port=8099):

@@ -2,8 +2,6 @@ import requests
 import logging
 from xml.etree import ElementTree as ET
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class PDU:
@@ -13,7 +11,7 @@ class PDU:
         self.session = requests.Session()
         self.status_url = f"http://{self.host}/status.xml"
         self.control_url = f"http://{self.host}/control_outlet.htm"
-        logger.info(f"PDU initialized for host: {self.host}")
+        logger.debug(f"PDU initialized for host: {self.host}")
 
     def status(self):
         try:

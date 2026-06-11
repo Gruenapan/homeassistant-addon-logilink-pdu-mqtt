@@ -51,6 +51,7 @@ mqtt_port: 1883
 mqtt_user: ""
 mqtt_password: ""
 mqtt_topic: "devices"
+log_level: "INFO"
 auto_discovery: true
 discovery_network: "192.168.1"
 discovery_range_start: 1
@@ -172,4 +173,4 @@ For issues and feature requests, please create an issue in the GitHub repository
 
 ## License
 
-This project is licensed under the MIT License. 
+This project is licensed under the MIT License.

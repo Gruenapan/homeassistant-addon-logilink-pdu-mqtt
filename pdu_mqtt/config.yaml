@@ -1,5 +1,5 @@
 name: Device MQTT Bridge (PDU & Shelly)
-version: "1.4.3"
+version: "1.4.4"
 slug: device_mqtt_bridge
 description: "MQTT bridge for PDUs and Shelly devices with visual discovery"
 arch:
@@ -21,6 +21,7 @@ options:
   mqtt_user: ""
   mqtt_password: ""
   mqtt_topic: "pdu"
+  log_level: "INFO"
   auto_discovery: true
   discovery_network: "192.168.1"
   discovery_range_start: 1
@@ -32,6 +33,7 @@ schema:
   mqtt_user: str?
   mqtt_password: str?
   mqtt_topic: str
+  log_level: "list(WARNING|INFO|DEBUG)"
   auto_discovery: bool
   discovery_network: str
   discovery_range_start: int
