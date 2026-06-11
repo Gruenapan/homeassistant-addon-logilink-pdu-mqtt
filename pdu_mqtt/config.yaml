@@ -1,5 +1,5 @@
 name: Device MQTT Bridge (PDU & Shelly)
-version: "1.4.1"
+version: "1.4.2"
 slug: device_mqtt_bridge
 description: "MQTT bridge for PDUs and Shelly devices with visual discovery"
 arch:

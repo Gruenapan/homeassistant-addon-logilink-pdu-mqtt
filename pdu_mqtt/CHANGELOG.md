@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.2] - 2026-06-11
+
+### Fixed
+- Keep the add-on running and retry with backoff when the MQTT broker is unavailable.
+- Support both Paho MQTT v1 and v2 disconnect callback signatures.
+- Report the packaged add-on version correctly in startup logs.
+
 ## [1.4.0] - 2024-12-15
 
 ### Added
@@ -116,4 +123,4 @@ device_list:
 - **Enhanced UI**: More visualization options and control panels
 - **Advanced Scheduling**: Built-in scheduling for device control
 - **Group Management**: Device grouping and bulk operations
-- **Cloud Integration**: Optional cloud connectivity for remote access 
+- **Cloud Integration**: Optional cloud connectivity for remote access

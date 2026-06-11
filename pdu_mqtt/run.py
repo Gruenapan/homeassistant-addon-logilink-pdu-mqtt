@@ -237,11 +237,20 @@ def on_connect(client, userdata, flags, rc, properties=None):
     else:
         logger.error(f"Failed to connect to MQTT broker: {rc}")
 
-def on_disconnect(client, userdata, rc, properties=None):
-    """MQTT disconnection callback (compatible with both API versions)"""
-    # Handle both API v1 and v2 (properties parameter is optional in v1)
+def on_disconnect(client, userdata, disconnect_flags, reason_code=None, properties=None):
+    """MQTT disconnection callback compatible with Paho API v1 and v2."""
+    # API v1 passes rc as the third argument. API v2 adds disconnect flags
+    # before the reason code.
+    rc = disconnect_flags if reason_code is None else reason_code
     if rc != 0:
         logger.warning(f"Unexpected disconnect from MQTT broker: {rc}")
+
+def start_mqtt_loop(mqtt_client, mqtt_host, mqtt_port):
+    """Start a non-blocking MQTT connection with automatic retry backoff."""
+    logger.info(f"Connecting to MQTT broker at {mqtt_host}:{mqtt_port}")
+    mqtt_client.reconnect_delay_set(min_delay=1, max_delay=120)
+    mqtt_client.connect_async(mqtt_host, mqtt_port, 60)
+    mqtt_client.loop_start()
 
 def on_message(client, userdata, msg):
     """Handle incoming MQTT messages"""
@@ -452,7 +461,7 @@ def main():
             )
             logger.info(f"Created PDU instance for {pdu_name}")
         
-        logger.info(f"Starting PDU MQTT Bridge v1.4.0")
+        logger.info("Starting PDU MQTT Bridge v1.4.2")
         logger.info(f"MQTT: {mqtt_host}:{mqtt_port}")
         logger.info(f"PDUs: {list(pdu_instances.keys())}")
         logger.info(f"Web interface: http://localhost:8099")
@@ -474,10 +483,10 @@ def main():
         client.on_message = on_message
         client.on_disconnect = on_disconnect
         
-        # Connect to MQTT broker
-        logger.info(f"Connecting to MQTT broker at {mqtt_host}:{mqtt_port}")
-        client.connect(mqtt_host, mqtt_port, 60)
-        client.loop_start()
+        # Keep the add-on alive while the MQTT broker is unavailable. Paho's
+        # network loop retries the asynchronous initial connection and later
+        # disconnects using the configured backoff.
+        start_mqtt_loop(client, mqtt_host, mqtt_port)
         
         # Wait for connection
         time.sleep(2)
